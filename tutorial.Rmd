@@ -69,6 +69,9 @@ Helper functions include:
 invisible( suppressMessages( library( ANTsR ) ) )
 library( pander )
 library( ggplot2 )
+library( igraph )
+library( psych )
+library( corrplot )
 
 rootDirectory <- "./"
 knitr::opts_knit$set( root.dir = rootDirectory )
@@ -118,7 +121,7 @@ invisible( plot.antsImage( restingStateBoldAverage, restingStateBoldSegImage,
 
 ## Spatially normalize AAL image
 
-```{r registerAAL, include = TRUE, echo = TRUE, message = FALSE, warning = FALSE, cache = TRUE}
+```{r registerAAL, include = TRUE, echo = TRUE, message = FALSE, warning = FALSE, cache = FALSE}
 
 # The AAL image (which will be used later in the tutorial) is not in the space of the
 # BOLD image so we do a quick registration of the AAL labels to the bold mask.  We
@@ -152,20 +155,21 @@ invisible( plot.antsImage( restingStateBoldAverage, aalWarpedImage,
 
 ## Preprocessing the resting state fMRI data
 
-```{r preprocessfmri, include = TRUE, echo = TRUE, message = FALSE, warning = FALSE, cache = TRUE}
+```{r preprocessfmri, include = TRUE, echo = TRUE, message = FALSE, warning = FALSE, cache = FALSE}
 # The evolution of fMRI functionality in ANTsR is still ongoing.  It began with
 # various utility functions to perform different aspects of fMRI preprocessing
 # (e.g., motion correction, band-pass filtering).  The function ``preprocessfMRI``
 # was created to join all these components into a single function with slight
 # enhancements made to create the function ``preprocessRestingBOLD``.  We should
-# probably deprecate the former but haven't yet.  Although this basic functionality
-# should suffice for most users, Brian has recently created the function
-# ``fmriNormalization`` to take advantage of fMRI with simultaneous structural T1-
-# weighted acquisitions that have been processed through the ``antsCorticalThickness.sh``
-# script.
+# probably deprecate the former..  Although this basic functionality should suffice
+# for most users, Brian has recently created the function ``fmriNormalization`` to
+# take advantage of fMRI with simultaneous structural T1-weighted acquisitions that
+# have been processed through the ``antsCorticalThickness.sh`` script.
 
 # We process our current subject with ``preprocessRestingBOLD`` and plot the average
-# of the resulting processed fMRI.
+# of the resulting processed fMRI.  Note that we're doing motion correction on the
+# lowest accuracy level for tutorial purposes.  For actual data, one would probably
+# want to increase the accuracy level.
 
 preprocessedRestingState <-
   preprocessRestingBOLD( restingStateBoldImage,
@@ -188,6 +192,7 @@ invisible( plot.antsImage(
 #   2. the global signal before and after regression (globalSignal)
 #   3. comparing the DVARS of the original data (DVARS) and the processed
 #        data (DVARSpostCleaning)
+#   4. Plot the CompCor nuisance variables
 
 numberOfTimeFrames <- dim( restingStateBoldImage )[4]
 
@@ -213,7 +218,7 @@ dvarsDataFrame <- data.frame( Frame = rep( 1:numberOfTimeFrames, 2 ),
 ggplot( dvarsDataFrame ) +
    geom_line( aes( x = Frame, y = DVARS, colour = Type ), size = 0.5 ) +  
      xlab( "Frame" ) + ylab( "DVARS" ) +
-     theme( legend.title = element_blank() ) + theme( aspect.ratio=1/3 )
+     theme( legend.title = element_blank() ) + theme( aspect.ratio = 1/3 )
 
 # Plot the global signal.  Do we regress out the global signal? Still an open issue.
 # Let's just explore the approach to regressing it out afterwards.  A better way would
@@ -233,8 +238,112 @@ globalSignalDataFrame <- data.frame( Frame = rep( 1:numberOfTimeFrames, 2 ),
 ggplot( globalSignalDataFrame ) +
    geom_line( aes( x = Frame, y = GlobalSignal, colour = Type ), size = 0.5 ) +  
      xlab( "Frame" ) + ylab( "Global signal intensity" ) +
-     theme( legend.title = element_blank() ) + theme( aspect.ratio=1/3 )
+     theme( legend.title = element_blank() ) + theme( aspect.ratio = 1/3 )
 
+# Plot the CompCor nuisance signals.  Defined in terms of the PCA decomposition of
+# the high frequency components of the BOLD signal.
+
+numberOfCompCorComponents <- ncol( preprocessedRestingState$nuisanceVariables )
+whichComponentLevels <- paste0( "CompCor", 1:numberOfCompCorComponents )
+whichComponent <- factor( as.vector(
+  matrix( rep( whichComponentLevels, numberOfTimeFrames ),
+    nrow = numberOfTimeFrames, byrow = TRUE ) ), levels = whichComponentLevels )
+
+compCorDataFrame <- data.frame(
+  Frame = rep( 1:numberOfTimeFrames, numberOfCompCorComponents ),
+  WhichComponent = whichComponent,
+  Values = as.vector( preprocessedRestingState$nuisanceVariables ) )
+
+ggplot( compCorDataFrame ) +
+   geom_line( aes( x = Frame, y = Values ), size = 0.25 ) +
+     facet_wrap( ~ WhichComponent, ncol = 3 ) +
+     xlab( "Frame" ) + ylab( "CompCor value" ) +
+     theme( legend.title = element_blank() ) + theme( aspect.ratio = 1/3 )
+```
+
+## Calculate functional connectivity measures
+
+```{r connectivity, include = TRUE, echo = TRUE, message = FALSE, warning = FALSE, cache = TRUE}
+
+# We use the AAL labels to calculate various functional connectivity measures for
+# this subject.
+
+# Mask out non-gray matter pixels from aalImage and plot image to ensure things look
+# correct.
+
+aalWarpedImage[restingStateBoldSegImage != 2] <- 0
+
+invisible( plot.antsImage( restingStateBoldAverage, aalWarpedImage,
+   alpha = 0.9, ncolumns = 5 ) )
+
+# Determine the unique AAL labels and construct the correlation matrix
+
+aalRoiLabelVector <- as.vector( as.array( aalWarpedImage[aalWarpedImage > 0] ) )
+aalUniqueLabels <- sort( unique( aalRoiLabelVector ) )
+
+boldMatrix <- timeseries2matrix(
+  preprocessedRestingState$cleanBoldImage, restingStateBoldMaskImage )
+
+boldLabelMatrix <- matrix( NA, nrow = nrow( boldMatrix ), ncol = length( aalUniqueLabels ) )
+for( j in 1:length( aalUniqueLabels ) )
+  {
+  currentLabelIndices <- which( aalRoiLabelVector == aalUniqueLabels[j] )
+  if( length( currentLabelIndices ) > 1 )
+    {
+    boldLabelMatrix[, j] <- rowMeans( boldMatrix[, currentLabelIndices] )
+    }
+  else
+    {
+    boldLabelMatrix[, j] <- mean( boldMatrix[, currentLabelIndices] )
+    }
+  }
+correlationMatrix <- cor( boldLabelMatrix, boldLabelMatrix )
+correlationMatrix[which( is.na( correlationMatrix ) )] <- 0
+rownames( correlationMatrix ) <- colnames( correlationMatrix ) <-
+  aalLabelTable$label_name[aalUniqueLabels]
+
+# We calculate the significance for each entry.  
+
+cor.mtest <- function( mat, ... )
+  {
+  mat <- as.matrix( mat )
+  n <- ncol( mat )
+  p.mat <- matrix( NA, n, n )
+  diag( p.mat ) <- 0
+
+  for( i in 1:( n - 1 ) )
+    {
+    for( j in ( i + 1 ):n )
+      {
+      tmp <- cor.test( mat[, i], mat[, j], ... )
+      p.mat[i, j] <- p.mat[j, i] <- tmp$p.value
+      }
+    }
+  colnames( p.mat ) <- rownames( p.mat ) <- colnames( mat )
+  p.mat
+  }
+
+p.mat <- cor.mtest( correlationMatrix )
+
+uvaColors <- colorRampPalette( c( "#F59A2C", "#F1E5C7", "#E6E7E8", "#46A8C2", "#0D3268" ) )
+correlationPlotFile <- paste0( figuresDirectory, '/CorrelationMatrix.pdf' );
+pdf( height=10, width=10, file = correlationPlotFile )
+corrplot( correlationMatrix, method = "circle", diag = FALSE, type = "upper",
+  tl.col = "black", tl.cex = 0.48, tl.srt = 45, col = uvaColors( 200 ),
+  p.mat = p.mat, sig.level = 0.01, insig = "blank" )
+invisible( dev.off() )
+```
+
+![Correlation plot illustrating the functional connectivity relationships between AAL-defined regions.](`r correlationPlotFile`)
+
+```{r graphmeasures, include = TRUE, echo = TRUE, message = FALSE, warning = FALSE, cache = TRUE}
+
+# Now we calculate various graph-based measures from the connectivity relationships.
+
+networkGraph <- makeGraph( correlationMatrix, graphdensity = 0.25, getEfficiency = TRUE )
+
+pander( summary( networkGraph ), style = "rmarkdown",
+  caption = "Graph-based connectivity measures." )
 ```
 
 \newpage

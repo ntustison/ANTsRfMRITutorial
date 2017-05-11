@@ -73,6 +73,13 @@ testing other decomposition algorithms performance when they use the same
 prewhitening step as ICA.
 
 
+## fMRI papers which use ANTsR
+
+* _The pediatric template of brain perfusion_ [@Avants:2015aa]
+
+* _Subject-specific functional parcellation via prior based eigenanatomy_ [@Dhillon:2014aa]
+
+* _Unexpected role of interferon-$\gamma$ in regulating neuronal connectivity and social behaviour_ [@Filiano:2016aa]
 
 [^1]: https://github.com/stnava/ANTsR
 

@@ -3,7 +3,6 @@ title: "A tutorial for fMRI analysis using ANTsR"
 bibliography: references.bib
 csl: national-science-foundation-grant-proposals.csl
 output: pdf_document
-
 ---
 
 # Introduction
@@ -38,7 +37,6 @@ in both subject and template space.
 * ``preprocessRestingBOLD`` --- Preprocess resting fMRI by performing compcor/motion
 correction, nuisance regression, band-pass filtering, and spatial smoothing.
 
-
 * ``antsMotionCalculation`` --- Corrects 4D time-series data for motion and returns
 useful information, e.g., nuisance variables such as framewise displacement and
 DVARS.  Uses ``antsMotionCorr`` for performing motion correction.
@@ -72,6 +70,16 @@ mask.
 testing other decomposition algorithms performance when they use the same
 prewhitening step as ICA.
 
+* ``makePointsImage`` -- Creates spherical points in the coordinate space of the
+target image based on the $n$-dimensional matrix of points and a specified radius.
+Used with data such as ``powers_areal_mni_itk``.  
+
+Data:
+
+* ``powers_areal_mni_itk`` --- Defines the set of nodes describing the functional
+organization of the brain as detailed in [@Power:2011aa] and made publicly available.[^1]
+
+[^1]: http://www.nil.wustl.edu/labs/petersen/Resources.html
 
 ## fMRI papers which use ANTsR
 
@@ -81,7 +89,6 @@ prewhitening step as ICA.
 
 * _Unexpected role of interferon-$\gamma$ in regulating neuronal connectivity and social behaviour_ [@Filiano:2016aa]
 
-[^1]: https://github.com/stnava/ANTsR
 
 
 \newpage
@@ -96,7 +103,7 @@ prewhitening step as ICA.
 # is running this script (stitchTutorialDocument.R) in the repo directory.  The
 # following R packages are required:
 #   * ANTsR: image I/O, fMRI processing
-#   * ggplot2: plot production
+#   * ggplot2: plot generation
 #   * igraph:  network connectivity measures
 #   * psych:  network connectivity measures
 #   * corrplot:  correlation plot generation
@@ -444,6 +451,40 @@ invisible( dev.off() )
 ```
 
 ![Graph of the functional connectivity of the default mode network.](`r dmnGraphPlotFile`)
+
+\newpage
+
+# Tutorial II:  Brian's current strategy
+
+## Read in input data
+
+```{r readdata2, include = TRUE, echo = TRUE, message = FALSE, warning = FALSE, cache = FALSE}
+
+# In this second tutorial, we expose more of the pre-processing aspects of the
+# fMRI pipeline and use it to process a single subject from the MMRR (Kirby) data
+# set:
+#    B. A. Landman, et al. "Multi-Parametric Neuroimaging Reproducibility: A 3T
+#    Resource Study", NeuroImage. (2010).
+#
+# We also explore functional connectivity using the nodal network described in
+#    J. D. Power, et al. "Functional network organization of the human brain",
+#    Neuron. (2011).
+# instead of using the AAL image to define ROIs.  
+
+# Read in the Kirby subject 01 images
+
+kirbyDirectory <- paste0( dataDirectory, "/KKI2009-01" )
+kirbyT1File <- paste0( kirbyDirectory, "/KKI2009-01-MPRAGE.nii.gz" )
+kirbySegFile <- paste0( kirbyDirectory, "/KKI2009-01-BrainSegmentation.nii.gz" )
+kirbyBoldFile <- paste0( kirbyDirectory, "/KKI2009-01-fMRI.nii.gz" )
+
+kirbyT1Image <- antsImageRead( kirbyT1File )
+kirbySegImage <- antsImageRead( kirbyT1File )
+kirbyBoldImage <- antsImageRead( kirbyT1File )
+
+# Read in MNI template
+
+```
 
 \newpage
 

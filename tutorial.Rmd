@@ -1,5 +1,5 @@
 ---
-title: "A tutorial for resting state fMRI analysis using ANTsR"
+title: "A tutorial for fMRI analysis using ANTsR"
 bibliography: references.bib
 csl: national-science-foundation-grant-proposals.csl
 output: pdf_document
@@ -18,37 +18,59 @@ output: pdf_document
 
 * Motion correction [@Power:2012aa;@Power:2014aa]
 
-* Global signal[@Liu:2017aa]
+* Global signal [@Liu:2017aa]
 
 
 ## ANTsR implementation
 
 The main fMRI-specific functions are:
 
-* ``fMRINormalization``
+* ``fMRINormalization`` --- This function leverages structural image processing
+based on ANTs cortical thickness to implement standard functional image processing
+recommendations. The function will crop out the first $k$ time frames, do motion
+correction and produce a variety of nuisance regressors. It will also do spatial
+and temporal filtering as well as interpolation between time frames that exceed a
+given framewise displacement. Finally, we return maps to the common coordinate
+system. Output may be trimmed in the future but currently provides access at
+different stages: merging versus filtering and normalized, fused BOLD images
+in both subject and template space.
 
-* ``preprocessRestingBOLD`` (supplants ``preprocessfMRI``?)
+* ``preprocessRestingBOLD`` --- Preprocess resting fMRI by performing compcor/motion
+correction, nuisance regression, band-pass filtering, and spatial smoothing.
 
-* ``antsBold``
 
-* ``antsMotionCalculation`` (supplants ``antsMotionCorr`` and ``antsMotionCorrStats``?)
+* ``antsMotionCalculation`` --- Corrects 4D time-series data for motion and returns
+useful information, e.g., nuisance variables such as framewise displacement and
+DVARS.  Uses ``antsMotionCorr`` for performing motion correction.
 
-* ``antsSpatialICAfMRI``
+* ``timeseries2matrix``/``matrix2timeseries`` --- Converts from/to a 4-D ``antsImage``
+object to/from a $n \times p$ matrix where $n$ is the number of time points and
+$p$ is the number of voxels in the specified mask.
 
-* ``filterfMRIforNetworkAnalysis``
+* ``antsSpatialICAfMRI`` --- Perform spatial ICA on group or individual fMRI data.
 
-* ``frequencyFilterfMRI``
+* ``frequencyFilterfMRI`` --- performs band-pass filtering on BOLD time series data.
 
-* ``getfMRInuisanceVariables``
+* ``getfMRInuisanceVariables`` --- Older, Black box-type function which performs
+motion correction, runs CompCor and estimates global signal (similar to
+``preprocessRestingBOLD``).  The output is a list with the time series data matrix
+(time by voxels), motion and other nuisance variables, global signal, the mask and
+the average time series image.   
 
+* ``filterfMRIforNetworkAnalysis`` --- to be deprecated.
+
+* ``preprocessfMRI`` --- to be deprecated (redundant functionality overlap with ``preprocessRestingBOLD``).
 
 Helper functions include:
 
-* ``timeseries2matrix``
+* ``matrixToImages``/``imagesToMatrix`` --- Converts to/from a $n \times p$ matrix
+from/to a list of ``antsImage`` where $n$ corresponds to the number of images and
+$n$ is equal to the number of voxels inside the specified
+mask.
 
-* ``matrixToImages``
-
-* ``icaWhiten``
+* ``icaWhiten`` --- Performs just the ica whitening step.  This is useful for
+testing other decomposition algorithms performance when they use the same
+prewhitening step as ICA.
 
 
 
@@ -64,7 +86,13 @@ Helper functions include:
 ```{r global options, include = TRUE, echo = TRUE, message = FALSE, warning = FALSE, cache = FALSE}
 
 # We include all the necessary R package dependencies.  We assume that the user
-# is running this script (stitchTutorialDocument.R) in the repo directory.
+# is running this script (stitchTutorialDocument.R) in the repo directory.  The
+# following R packages are required:
+#   * ANTsR: image I/O, fMRI processing
+#   * ggplot2: plot production
+#   * igraph:  network connectivity measures
+#   * psych:  network connectivity measures
+#   * corrplot:  correlation plot generation
 
 invisible( suppressMessages( library( ANTsR ) ) )
 library( pander )
@@ -90,6 +118,13 @@ dataDirectory <- paste0( rootDirectory, "Data/" );
 ```{r readdata, include = TRUE, echo = TRUE, message = FALSE, warning = FALSE, cache = FALSE}
 
 # Load the AAL (Automated Anatomical Labeling) data table and the AAL label image.
+# These data define the AAL atlas of the human brain often used in fMRI for obtaining
+# the anatomical regions of interest:
+#    N. Tzourio-Mazoyer; B. Landeau; D. Papathanassiou; F. Crivello; O. Etard; N.
+#    Delcroix; Bernard Mazoyer & M. Joliot (January 2002). "Automated Anatomical
+#    Labeling of activations in SPM using a Macroscopic Anatomical Parcellation
+#    of the MNI MRI single-subject brain". NeuroImage. 15 (1): 273–289.
+#
 # Also load the individual subject resting state BOLD images:  4-D bold, 3-D bold
 # mask image, and 3-D segmentation (csf, gm, wm, etc.) image.
 
@@ -114,9 +149,23 @@ restingStateBoldAverage <- getAverageOfTimeSeries( restingStateBoldImage )
 invisible( plot.antsImage( restingStateBoldAverage, restingStateBoldMaskImage,
    alpha = 0.75, ncolumns = 5 ) )
 
-#  Average of 4-D bold with segmentation mask superimposed
+# Average of 4-D bold with segmentation mask superimposed
 invisible( plot.antsImage( restingStateBoldAverage, restingStateBoldSegImage,
    alpha = 0.9, ncolumns = 5 ) )
+
+# Another possible use of ``plot.antsImage`` is to map the input image to another
+# image of known/standard orientation, e.g., MNI space.  To do this, we read in the
+# MNI template (see http://www.lead-dbs.org/?p=1241) and do a quick registration.
+
+mniFile <- paste0( dataDirectory, "/mni.nii.gz" )
+mniImage <- antsImageRead( mniFile, dimension = 3 )
+
+mniRegistration <- antsRegistration( fixed = mniImage,
+                      moving = restingStateBoldAverage, typeofTransform = "QuickRigid",
+                      outprefix = paste0( dataDirectory, "mnixrs" ) )
+
+invisible( plot( restingStateBoldAverage, mniImage, ncolumns = 5, axis = 3, alpha = 0.25,
+   domainImageMap = c( mniImage, mniRegistration$fwdtransforms ) ) )
 ```
 
 ## Spatially normalize AAL image
@@ -156,19 +205,10 @@ invisible( plot.antsImage( restingStateBoldAverage, aalWarpedImage,
 ## Preprocessing the resting state fMRI data
 
 ```{r preprocessfmri, include = TRUE, echo = TRUE, message = FALSE, warning = FALSE, cache = FALSE}
-# The evolution of fMRI functionality in ANTsR is still ongoing.  It began with
-# various utility functions to perform different aspects of fMRI preprocessing
-# (e.g., motion correction, band-pass filtering).  The function ``preprocessfMRI``
-# was created to join all these components into a single function with slight
-# enhancements made to create the function ``preprocessRestingBOLD``.  We should
-# probably deprecate the former..  Although this basic functionality should suffice
-# for most users, Brian has recently created the function ``fmriNormalization`` to
-# take advantage of fMRI with simultaneous structural T1-weighted acquisitions that
-# have been processed through the ``antsCorticalThickness.sh`` script.
-
-# We process our current subject with ``preprocessRestingBOLD`` and plot the average
-# of the resulting processed fMRI.  Note that we're doing motion correction on the
-# lowest accuracy level for tutorial purposes.  For actual data, one would probably
+# The evolution of fMRI functionality in ANTsR is still ongoing. We process our
+# current subject with ``preprocessRestingBOLD`` and plot the average of the
+# resulting processed fMRI.  Note that we're doing motion correction on the lowest
+# accuracy level for tutorial purposes.  For actual data, one would probably
 # want to increase the accuracy level.
 
 preprocessedRestingState <-
@@ -196,15 +236,18 @@ invisible( plot.antsImage(
 
 numberOfTimeFrames <- dim( restingStateBoldImage )[4]
 
-# Plot the framewise displacement.  
+# Plot the framewise displacement.  Note the extreme displacements during the
+# initial acquisition.  This is common and preprocessing often involves discarding
+# the first N frames.  
 
 fdDataFrame <- data.frame( Frame = 1:numberOfTimeFrames,
    FD = preprocessedRestingState$FD - mean( preprocessedRestingState$FD ) )
 
 ggplot( fdDataFrame ) +
    geom_line( aes( x = Frame, y = FD ), size = 0.5 ) +  
-     xlab( "Frame" ) + ylab( "Framewise displacement" ) +
-     theme( legend.title = element_blank() ) + theme( aspect.ratio=1/3 )
+   geom_vline( xintercept = 20, linetype = "dashed", size = 0.5, color = "red" ) +
+   xlab( "Frame" ) + ylab( "Framewise displacement" ) +
+   theme( legend.title = element_blank() ) + theme( aspect.ratio=1/3 )
 
 # Plot the DVARS.  Defined as the framewise backwards RMS voxelwise difference averaged
 # over each time frame.
@@ -327,7 +370,7 @@ p.mat <- cor.mtest( correlationMatrix )
 
 uvaColors <- colorRampPalette( c( "#F59A2C", "#F1E5C7", "#E6E7E8", "#46A8C2", "#0D3268" ) )
 correlationPlotFile <- paste0( figuresDirectory, '/CorrelationMatrix.pdf' );
-pdf( height=10, width=10, file = correlationPlotFile )
+pdf( height = 10, width = 10, file = correlationPlotFile )
 corrplot( correlationMatrix, method = "circle", diag = FALSE, type = "upper",
   tl.col = "black", tl.cex = 0.48, tl.srt = 45, col = uvaColors( 200 ),
   p.mat = p.mat, sig.level = 0.01, insig = "blank" )
@@ -336,15 +379,64 @@ invisible( dev.off() )
 
 ![Correlation plot illustrating the functional connectivity relationships between AAL-defined regions.](`r correlationPlotFile`)
 
-```{r graphmeasures, include = TRUE, echo = TRUE, message = FALSE, warning = FALSE, cache = TRUE}
+```{r defaultmodenetwork, include = TRUE, echo = TRUE, message = FALSE, warning = FALSE, cache = FALSE}
 
-# Now we calculate various graph-based measures from the connectivity relationships.
+# Instead of exploring the connectivity of the entire set of AAL labels, let's just
+# look at specific networks (default mode and salience networks).  This information is in
+# ``aalLabelTable``.
 
-networkGraph <- makeGraph( correlationMatrix, graphdensity = 0.25, getEfficiency = TRUE )
+# Default mode network
 
-pander( summary( networkGraph ), style = "rmarkdown",
-  caption = "Graph-based connectivity measures." )
+aalDmnLabels <- aalLabelTable$label_num[which( aalLabelTable$isdmn > 0 )]
+
+dmnBoldLabelMatrix <- matrix( NA, nrow = nrow( boldMatrix ), ncol = length( aalDmnLabels ) )
+for( j in 1:length( aalDmnLabels ) )
+  {
+  currentLabelIndices <- which( aalRoiLabelVector == aalDmnLabels[j] )
+  if( length( currentLabelIndices ) > 1 )
+    {
+    dmnBoldLabelMatrix[, j] <- rowMeans( boldMatrix[, currentLabelIndices] )
+    }
+  else
+    {
+    dmnBoldLabelMatrix[, j] <- mean( boldMatrix[, currentLabelIndices] )
+    }
+  }
+dmnCorrelationMatrix <- cor( dmnBoldLabelMatrix, dmnBoldLabelMatrix )
+dmnCorrelationMatrix[which( is.na( dmnCorrelationMatrix ) )] <- 0
+rownames( dmnCorrelationMatrix ) <- colnames( dmnCorrelationMatrix ) <-
+  aalLabelTable$label_name[aalDmnLabels]
+
+p.mat <- cor.mtest( dmnCorrelationMatrix )
+
+dmnCorrelationPlotFile <- paste0( figuresDirectory, '/dmnCorrelationMatrix.pdf' )
+pdf( height=5, width=5, file = dmnCorrelationPlotFile )
+corrplot( dmnCorrelationMatrix, method = "circle", diag = FALSE, type = "upper",
+  tl.col = "black", tl.cex = 0.75, tl.srt = 45, col = uvaColors( 200 ),
+  p.mat = p.mat, sig.level = 0.01, insig = "blank" )
+invisible( dev.off() )
 ```
+
+![Correlation plot illustrating the functional connectivity relationships in the default mode network.](`r dmnCorrelationPlotFile`)
+
+```{r defaultmodenetworkgraph, include = TRUE, echo = TRUE, message = FALSE, warning = FALSE, cache = FALSE}
+
+# Now we calculate various graph-based measures from the connectivity relationships
+# in the default mode network and plot the resulting graph.
+
+networkGraph <- makeGraph( dmnCorrelationMatrix, graphdensity = 0.25, getEfficiency = T )
+
+V( networkGraph$mygraph )$color <- "#F59A2C"
+V( networkGraph$mygraph )$label.cex <- 1.0
+E( networkGraph$mygraph )$width <- 1.5
+
+dmnGraphPlotFile <- paste0( figuresDirectory, '/dmnGraph.pdf' )
+pdf( height = 10, width = 10, file = dmnGraphPlotFile )
+plot.igraph( networkGraph$mygraph, layout = layout.fruchterman.reingold )
+invisible( dev.off() )
+```
+
+![Graph of the functional connectivity of the default mode network.](`r dmnGraphPlotFile`)
 
 \newpage
 

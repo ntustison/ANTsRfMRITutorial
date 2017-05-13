@@ -1,0 +1,104 @@
+<!--
+
+\newpage
+
+
+# Tutorial II
+
+## Read in input data
+
+```{r readdata2, include = TRUE, echo = TRUE, message = FALSE, warning = FALSE, cache = FALSE}
+
+# In this second tutorial, we expose more of the pre-processing aspects of the
+# fMRI pipeline and use it to process a single subject from the MMRR (Kirby) data
+# set:
+#    B. A. Landman, et al. "Multi-Parametric Neuroimaging Reproducibility: A 3T
+#    Resource Study", NeuroImage. (2010).
+#
+# We also explore functional connectivity using the nodal network described in
+#    J. D. Power, et al. "Functional network organization of the human brain",
+#    Neuron. (2011).
+# instead of using the AAL image to define ROIs.  
+
+# Read in the Kirby subject 01 images
+
+kirbyDirectory <- paste0( dataDirectory, "/KKI2009-01/" )
+kirbyT1File <- paste0( kirbyDirectory, "/KKI2009-01-MPRAGE.nii.gz" )
+kirbySegFile <- paste0( kirbyDirectory, "/KKI2009-01-BrainSegmentation.nii.gz" )
+kirbyBoldFile <- paste0( kirbyDirectory, "/KKI2009-01-fMRI.nii.gz" )
+
+kirbyT1Image <- antsImageRead( kirbyT1File )
+kirbySegImage <- antsImageRead( kirbySegFile )
+kirbyBoldImage <- antsImageRead( kirbyBoldFile, dimension = 4 )
+kirbyAverageBoldImage <- getAverageOfTimeSeries( kirbyBoldImage )
+
+kirbyBrainMaskImage <- antsImageClone( kirbySegImage )
+kirbyBrainMaskImage[kirbyBrainMaskImage > 0] <- 1
+kirbyBrainImage <- kirbyT1Image * kirbyBrainMaskImage
+
+# Download the MNI template (which is skull-stripped)
+
+mniTemplate <- antsImageRead( getANTsRData( "ch2" ) )
+
+# Load the Powers node network table and construct the label image in the space
+# of the MNI template.  Plot the node label image on the MNI template in the axial
+# view.
+
+data( "powers_areal_mni_itk", package = "ANTsR" )
+powersTable <- powers_areal_mni_itk
+nodeMniCoordinates <- powersTable[, 1:3]
+powersLabelImage <- makePointsImage( nodeMniCoordinates, mniTemplate, radius = 3 )
+
+invisible( plot.antsImage( mniTemplate, powersLabelImage, ncolumns = 5, axis = 3 ) )
+```
+
+## Spatial normalization to T1
+
+```{r normalization, include = TRUE, echo = TRUE, message = FALSE, warning = FALSE, cache = FALSE}
+
+# We rigidly register the average BOLD image to the T1 image and use the transform
+# to warp the BOLD time series to the space of the T1.  This is a "quick"
+# transformation because of the limits of the tutorial format.  A more thorough
+# transform might be employed in other scenarios.
+
+start.time <- Sys.time()
+
+kirbyT1xBoldRegistration <- antsRegistration( fixed = kirbyT1Image,
+  moving = kirbyAverageBoldImage, typeofTransform = "QuickRigid",
+  outprefix = paste0( kirbyDirectory, "kirbyT1xBold" ) )
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+cat( "Registration kirbyT1xBold: ", time.taken, "seconds. \n" )
+
+start.time <- Sys.time()
+
+kirbyT1xMniRegistration <- antsRegistration( fixed = kirbyBrainImage,
+  moving = mniTemplate, typeofTransform = "SyNabp",
+  outprefix = paste0( kirbyDirectory, "kirbyT1xMni" ) )
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+cat( "Registration kirbyT1xMni: ", time.taken, "seconds. \n" )
+
+
+```
+
+```
+# We
+
+t1xBoldRegistration <- antsRegistration( fixed =
+
+
+# Run fMRINormalization to estimate motion correction and remove polynomial
+# nuisance variables.  This also calculate the BOLD-to-T1 mapping.
+
+fmriProcessed <-
+  fMRINormalization( kirbyBoldImage, fdthresh = Inf, repeatMotionEst = 2,
+    structuralImage = kirbyT1Image, structuralSeg = kirbySegImage,
+    boldMap = kirbyT1xBoldRegistration$fwdtransforms,
+    polydegree = 4, nCompCor = 4, extraRuns = NA, verbose = TRUE )
+
+```
+
+-->

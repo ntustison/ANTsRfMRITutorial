@@ -32,7 +32,7 @@ and temporal filtering as well as interpolation between time frames that exceed 
 given framewise displacement. Finally, we return maps to the common coordinate
 system. Output may be trimmed in the future but currently provides access at
 different stages: merging versus filtering and normalized, fused BOLD images
-in both subject and template space.
+in both subject and template space.  Also accommodates multiple runs.
 
 * ``preprocessRestingBOLD`` --- Preprocess resting fMRI by performing compcor/motion
 correction, nuisance regression, band-pass filtering, and spatial smoothing.
@@ -451,40 +451,6 @@ invisible( dev.off() )
 ```
 
 ![Graph of the functional connectivity of the default mode network.](`r dmnGraphPlotFile`)
-
-\newpage
-
-# Tutorial II:  Brian's current strategy
-
-## Read in input data
-
-```{r readdata2, include = TRUE, echo = TRUE, message = FALSE, warning = FALSE, cache = FALSE}
-
-# In this second tutorial, we expose more of the pre-processing aspects of the
-# fMRI pipeline and use it to process a single subject from the MMRR (Kirby) data
-# set:
-#    B. A. Landman, et al. "Multi-Parametric Neuroimaging Reproducibility: A 3T
-#    Resource Study", NeuroImage. (2010).
-#
-# We also explore functional connectivity using the nodal network described in
-#    J. D. Power, et al. "Functional network organization of the human brain",
-#    Neuron. (2011).
-# instead of using the AAL image to define ROIs.  
-
-# Read in the Kirby subject 01 images
-
-kirbyDirectory <- paste0( dataDirectory, "/KKI2009-01" )
-kirbyT1File <- paste0( kirbyDirectory, "/KKI2009-01-MPRAGE.nii.gz" )
-kirbySegFile <- paste0( kirbyDirectory, "/KKI2009-01-BrainSegmentation.nii.gz" )
-kirbyBoldFile <- paste0( kirbyDirectory, "/KKI2009-01-fMRI.nii.gz" )
-
-kirbyT1Image <- antsImageRead( kirbyT1File )
-kirbySegImage <- antsImageRead( kirbyT1File )
-kirbyBoldImage <- antsImageRead( kirbyT1File )
-
-# Read in MNI template
-
-```
 
 \newpage
 
